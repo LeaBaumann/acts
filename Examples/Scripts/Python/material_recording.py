@@ -24,7 +24,8 @@ u = acts.UnitConstants
 def runMaterialRecording(
     detector,
     s,
-    tracksPerEvent=10000,
+    #tracksPerEvent=10000,
+    tracksPerEvent=10,
     etaRange=(-4.0, 4.0),
     phiRange=(0.0, 360.0 * u.degree),
     materialTrackCollectionName="material_tracks",
@@ -139,7 +140,7 @@ def main():
 
     detector = None
     if args.input == "":
-        detector = getOpenDataDetector()
+        detector = getOpenDataDetector(gen3=True)
     elif args.input.endswith(".gdml"):
         detector = acts.examples.geant4.GdmlDetector(path=args.input)
     elif args.input.endswith(".sqlite") or args.input.endswith(".db"):
