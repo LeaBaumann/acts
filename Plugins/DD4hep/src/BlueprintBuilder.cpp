@@ -188,6 +188,34 @@ std::shared_ptr<Acts::StaticBlueprintNode> DD4hepBackend::makeBeampipe() const {
   return std::make_shared<Acts::StaticBlueprintNode>(std::move(volume));
 }
 
+std::shared_ptr<Acts::StaticBlueprintNode> DD4hepBackend::makePassiveCylinder(
+    const Element& element) const {
+  const auto tgTransform = element.nominal().worldTransformation();
+  auto [bounds, transform, thickness] =
+      ActsPlugins::TGeoSurfaceConverter::cylinderComponents(
+          *element.placement().ptr()->GetVolume()->GetShape(),
+          tgTransform.GetRotationMatrix(), tgTransform.GetTranslation(), "XYZ",
+          m_cfg.lengthScale);
+
+  if (bounds == nullptr) {
+    ACTS_ERROR("Element " << nameOf(element)
+                          << " shape could not be converted to cylinder.");
+    throw std::runtime_error(
+        "Passive cylinder element shape could not be converted to cylinder.");
+  }
+
+  // Unlike the beampipe (treated as solid down to r=0), this is a real
+  // annulus - cylinderComponents reports the *mid*-radius plus the wall
+  // thickness, so recover the actual inner/outer radius from those.
+  const double medR = bounds->get(Acts::CylinderBounds::eR);
+  auto volumeBounds = std::make_shared<Acts::CylinderVolumeBounds>(
+      medR - thickness / 2.0, medR + thickness / 2.0,
+      bounds->get(Acts::CylinderBounds::eHalfLengthZ));
+  auto volume = std::make_unique<Acts::TrackingVolume>(transform, volumeBounds,
+                                                       nameOf(element));
+  return std::make_shared<Acts::StaticBlueprintNode>(std::move(volume));
+}
+
 }  // namespace ActsPlugins::DD4hep
 
 // Explicit template instantiation for DD4hepBackend. Ensures all template
