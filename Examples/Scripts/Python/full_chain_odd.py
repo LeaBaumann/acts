@@ -12,6 +12,7 @@ import numpy as np
 
 import acts
 import acts.examples
+import acts.examples.dd4hep
 from acts.examples.simulation import (
     MomentumConfig,
     EtaConfig,
@@ -193,7 +194,14 @@ if generation == "gen1":
     detector = getOpenDataDetector(odd_dir=geoDir, materialDecorator=oddMaterialDeco)
     print("gen1")
 elif generation == "gen3":
-    detector = getOpenDataDetector(odd_dir=geoDir, materialDecorator=oddMaterialDeco, gen3=True)
+    detector = getOpenDataDetector(
+    odd_dir=geoDir,
+    materialDecorator=oddMaterialDeco,
+    gen3=True)
+    # construction method:
+    # default: barrel-endcap
+    # DirectLayer: constructionMethod=acts.examples.dd4hep.OpenDataDetector.Config.ConstructionMethod.DirectLayer,
+    # DirectLayerGrouped: constructionMethod=acts.examples.dd4hep.OpenDataDetector.Config.ConstructionMethod.DirectLayerGrouped,
     print("gen3")
 else:
     print("no valid generation chosen")
@@ -543,6 +551,18 @@ def load_hits(path):
     return z, np.sqrt(x**2 + y**2)
 
 
+def load_material_steps(path, positions="mat", entry_stop=1000):
+    """Material steps from a material track file (e.g. *_mapped.root).
+
+    positions: "mat" -> where Geant4 recorded the material,
+               "sur" -> where the track crosses the surface the step was assigned to
+    """
+    tree = uproot.open(path)["material_tracks"]
+    steps = tree.arrays([f"{positions}_z", f"{positions}_r"], entry_stop=entry_stop, library="ak")
+    return (ak.flatten(steps[f"{positions}_z"]).to_numpy(),
+            ak.flatten(steps[f"{positions}_r"]).to_numpy())
+
+
 def load_propagation(path):
     tree = uproot.open(path)["propagation_steps"]
     steps = tree.arrays(["g_z", "g_r", "approach_id", "boundary_id", "sensitive_id"], library="ak")
@@ -636,12 +656,13 @@ def _planar_rect(surface, gctx, local_corners, vol_id, lay_id):
 
 
 
-def make_plot(geometry, overlay=None, id_mode="uniform", generation=generation, filename=None, title=None):
+def make_plot(geometry, overlay=None, id_mode="uniform", generation=generation, filename=None, title=None, positions="mat"):
     """
     geometry:   "volume" | "layer" | "sensitive" | "material"
-    overlay:    None | "hits" | "propagation"
+    overlay:    None | "hits" | "propagation" | "material_steps"
     id_mode: "uniform" | "approach" | "boundary" | "sensitive"
                 (only used when overlay == "propagation")
+    positions:  "mat" | "sur" (only used when overlay == "material_steps")
     """
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -665,6 +686,11 @@ def make_plot(geometry, overlay=None, id_mode="uniform", generation=generation, 
         draw_overlay(ax, z, r, mode="uniform", point_size=1, point_alpha=0.3)
         ax.collections[-1].set_color("red")
 
+    elif overlay == "material_steps":
+        z, r = load_material_steps(MATERIAL_TRACKS_PATH, positions=positions)
+        draw_overlay(ax, z, r, mode="uniform", point_size=0.1, point_alpha=0.1)
+        ax.collections[-1].set_color("red")
+
     elif overlay == "propagation":
         steps = load_propagation(PROPAGATION_PATH)
         z, r = steps["z"], steps["r"]
@@ -682,6 +708,8 @@ def make_plot(geometry, overlay=None, id_mode="uniform", generation=generation, 
         plt.colorbar(ax.collections[-1], ax=ax, label=cbar_label)
 
     name = build_name(geometry, overlay, id_mode, generation)
+    if overlay == "material_steps":
+        name = name.replace("material_steps", f"material_steps_{positions}")
 
     ax.set_xlabel("z [mm]")
     ax.set_ylabel("r [mm]")
@@ -707,6 +735,8 @@ def make_plot(geometry, overlay=None, id_mode="uniform", generation=generation, 
 
 HITS_PATH = "/home/lea-baumann/Documents/PhD/ACTS/Outputs/odd_output_propagation_events1000/hits.root"
 PROPAGATION_PATH = "/home/lea-baumann/Documents/PhD/ACTS/acts/propagation_"+generation+"/propagation_steps.root"
+# Material tracks after mapping (here: gen3 run with calorimeter)
+MATERIAL_TRACKS_PATH = "/home/lea-baumann/Documents/PhD/ACTS/acts/mydet_material_mapped.root"
 
 gctx = acts.GeometryContext.dangerouslyDefaultConstruct()
 volumeVisitor = LeasVisitor(gctx)
@@ -748,6 +778,8 @@ print(f"Volumes: {len(volumeVisitor.volumes)} | Layers: {layerVisitor.num_layers
 make_plot("material")
 #make_plot("material", overlay="hits")
 #make_plot("material", overlay="propagation")
+make_plot("material", overlay="material_steps", positions="mat")
+make_plot("material", overlay="material_steps", positions="sur")
 
 
 if args.reco:
