@@ -736,7 +736,8 @@ def make_plot(geometry, overlay=None, id_mode="uniform", generation=generation, 
 HITS_PATH = "/home/lea-baumann/Documents/PhD/ACTS/Outputs/odd_output_propagation_events1000/hits.root"
 PROPAGATION_PATH = "/home/lea-baumann/Documents/PhD/ACTS/acts/propagation_"+generation+"/propagation_steps.root"
 # Material tracks after mapping (here: gen3 run with calorimeter)
-MATERIAL_TRACKS_PATH = "/home/lea-baumann/Documents/PhD/ACTS/acts/mydet_material_mapped.root"
+MATERIAL_TRACKS_PATH = "/home/lea-baumann/Documents/PhD/ACTS/root/Gen3_Calorimeter=on/calo_cage2_material_mapped.root"
+
 
 gctx = acts.GeometryContext.dangerouslyDefaultConstruct()
 volumeVisitor = LeasVisitor(gctx)
