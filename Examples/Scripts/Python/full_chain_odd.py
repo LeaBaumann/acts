@@ -191,15 +191,23 @@ oddMaterialDeco = acts.IMaterialDecorator.fromFile(oddMaterialMap)
 
 generation = "gen3"
 if generation == "gen1":
-    detector = getOpenDataDetector(odd_dir=geoDir, materialDecorator=oddMaterialDeco)
+    detector = getOpenDataDetector(
+        odd_dir=geoDir, materialDecorator=oddMaterialDeco, gen3=False
+    )
     print("gen1")
 elif generation == "gen3":
     detector = getOpenDataDetector(
     odd_dir=geoDir,
     materialDecorator=oddMaterialDeco,
     gen3=True)
-    # construction method:
-    # default: barrel-endcap
+    # construction method: left at the default (BarrelEndcap), since the
+    # stable material keys are derived from each layer's blueprint name,
+    # which differs between construction methods (DirectLayerGrouped in
+    # particular names layers via the full DD4hep hierarchy path). The
+    # material map from material_mapping.py is built with the default
+    # BarrelEndcap method too, so its keys only match a BarrelEndcap-built
+    # detector. To use a different construction method here, the map must
+    # be regenerated with the same method.
     # DirectLayer: constructionMethod=acts.examples.dd4hep.OpenDataDetector.Config.ConstructionMethod.DirectLayer,
     # DirectLayerGrouped: constructionMethod=acts.examples.dd4hep.OpenDataDetector.Config.ConstructionMethod.DirectLayerGrouped,
     print("gen3")
@@ -402,13 +410,17 @@ class LeasLayerVisitor(acts.TrackingGeometryMutableVisitor):
         z_center = surface.center(self._gctx)[2]
         thickness = 2.0
 
-        if isinstance(surface, acts.CylinderSurface):
+        # Checked on surface.bounds, not surface itself: layer.surfaceRepresentation
+        # doesn't reliably downcast to the concrete Surface subclass (CylinderSurface/
+        # DiscSurface) through this property, so isinstance(surface, ...) silently
+        # misses about half the layers (e.g. only odd layer indices in Pixel barrel).
+        if isinstance(bounds, acts.CylinderBounds):
             r = bounds.get(acts.CylinderBoundsValue.R)
             r_min = r - (thickness / 2.0)
             r_max = r + (thickness / 2.0)
             half_z = bounds.get(acts.CylinderBoundsValue.HalfLengthZ)
             self.layers.append((z_center - half_z, z_center + half_z, r_min, r_max, vol_id, lay_id))
-        elif isinstance(surface, acts.DiscSurface):
+        elif isinstance(bounds, (acts.RadialBounds, acts.AnnulusBounds)):
             if isinstance(bounds, acts.RadialBounds):
                 r_min = values[acts.RadialBoundsValue.MinR]
                 r_max = values[acts.RadialBoundsValue.MaxR]
@@ -418,6 +430,24 @@ class LeasLayerVisitor(acts.TrackingGeometryMutableVisitor):
             z_min = z_center - (thickness / 2.0)
             z_max = z_center + (thickness / 2.0)
             self.layers.append((z_min, z_max, r_min, r_max, vol_id, lay_id))
+
+
+def volumeIdsWhere(trackingGeometry, predicate):
+    """Collect geometryId.volume for every TrackingVolume whose name matches
+    predicate(name). Used to derive CKF volume lists (pixelVolumes,
+    stripVolumes, constrainToVolumes) by name instead of hardcoding numeric
+    GeometryIdentifiers, which shift whenever the blueprint gains or loses
+    volumes (e.g. passive elements, material collectors, gap fillers)."""
+    ids = set()
+
+    class _Visitor(acts.TrackingGeometryMutableVisitor):
+        def visitVolume(self, volume: acts.Volume):
+            name = volume.volumeName if isinstance(volume, acts.TrackingVolume) else ""
+            if predicate(name):
+                ids.add(volume.geometryId.volume)
+
+    trackingGeometry.apply(_Visitor())
+    return sorted(ids)
 
 
 class LeasSensitiveVisitor(acts.TrackingGeometryMutableVisitor):
@@ -761,24 +791,24 @@ print(f"Volumes: {len(volumeVisitor.volumes)} | Layers: {layerVisitor.num_layers
 # Generate the plots
 # ============================================================
 
-#make_plot("volume")
-#make_plot("volume", overlay="hits")
-#make_plot("volume", overlay="propagation")
+make_plot("volume")
+make_plot("volume", overlay="hits")
+make_plot("volume", overlay="propagation")
 
-#make_plot("layer")
-#make_plot("layer", overlay="hits")
-#make_plot("layer", overlay="propagation")
+make_plot("layer")
+make_plot("layer", overlay="hits")
+make_plot("layer", overlay="propagation")
 
-#make_plot("sensitive")
-#make_plot("sensitive", overlay="hits")
-#make_plot("sensitive", overlay="propagation", id_mode="sensitive")
-#make_plot("sensitive", overlay="propagation", id_mode="approach")
-#make_plot("sensitive", overlay="propagation", id_mode="boundary")
-#make_plot("sensitive", overlay="propagation", id_mode="uniform")
+make_plot("sensitive")
+make_plot("sensitive", overlay="hits")
+make_plot("sensitive", overlay="propagation", id_mode="sensitive")
+make_plot("sensitive", overlay="propagation", id_mode="approach")
+make_plot("sensitive", overlay="propagation", id_mode="boundary")
+make_plot("sensitive", overlay="propagation", id_mode="uniform")
 
 make_plot("material")
-#make_plot("material", overlay="hits")
-#make_plot("material", overlay="propagation")
+make_plot("material", overlay="hits")
+make_plot("material", overlay="propagation")
 make_plot("material", overlay="material_steps", positions="mat")
 make_plot("material", overlay="material_steps", positions="sur")
 
@@ -817,6 +847,40 @@ if args.reco:
             outputDirCsv=outputDir if args.output_csv else None,
         )
 
+    if generation == "gen3":
+        # Derived by name rather than hardcoded: Gen3's numeric volume IDs
+        # shift whenever the blueprint gains or loses volumes (e.g. this PR's
+        # passive elements and material collectors), so literal IDs silently
+        # go stale -- CKF then constrains itself to the wrong (or no) volumes
+        # and finds zero tracks without raising an error. Name-based lookup
+        # survives future geometry changes.
+        pixelVolumes = volumeIdsWhere(trackingGeometry, lambda n: "Pixel" in n)
+        stripVolumes = volumeIdsWhere(trackingGeometry, lambda n: "Strip" in n)
+        constrainToVolumes = volumeIdsWhere(
+            trackingGeometry,
+            lambda n: n != "World" and not n.startswith("CaloMaterialCollector"),
+        )
+    else:
+        pixelVolumes = [16, 17, 18]
+        stripVolumes = [23, 24, 25]
+        constrainToVolumes = [
+            2,  # beam pipe
+            32,
+            4,  # beam pip gap
+            16,
+            17,
+            18,  # pixel
+            20,  # PST
+            23,
+            24,
+            25,  # short strip
+            26,
+            8,  # long strip gap
+            28,
+            29,
+            30,  # long strip
+        ]
+
     addCKFTracks(
         s,
         trackingGeometry,
@@ -835,27 +899,11 @@ if args.reco:
             numMeasurementsCutOff=2,
             seedDeduplication=True,
             stayOnSeed=True,
-            pixelVolumes=[16, 17, 18],
-            stripVolumes=[23, 24, 25],
+            pixelVolumes=pixelVolumes,
+            stripVolumes=stripVolumes,
             maxPixelHoles=1,
             maxStripHoles=2,
-            constrainToVolumes=[
-                2,  # beam pipe
-                32,
-                4,  # beam pip gap
-                16,
-                17,
-                18,  # pixel
-                20,  # PST
-                23,
-                24,
-                25,  # short strip
-                26,
-                8,  # long strip gap
-                28,
-                29,
-                30,  # long strip
-            ],
+            constrainToVolumes=constrainToVolumes,
         ),
         outputDirRoot=outputDir if args.output_root else None,
         outputDirCsv=outputDir if args.output_csv else None,
